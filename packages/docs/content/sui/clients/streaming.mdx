@@ -313,6 +313,11 @@ const client = new SuiGrpcClient({
 });
 ```
 
+On Node.js, [`GrpcNodeTransport`](./grpc.mdx#native-grpc-transport) from
+`@mysten/grpc-node-transport` reads streams over native HTTP/2 with flow control: during a pause it
+holds at most 16 decoded messages (its `prefetch` option) plus a 64 KiB HTTP/2 window, and the
+server waits.
+
 A custom transport can implement `serverStreamingIterable` (the `PullServerStreamingTransport`
 interface from `@mysten/sui/grpc`) to read on demand. Use `normalizeGrpcError` and
 `grpcStatusFromAbortReason` so its errors are retried like the default transport's.
