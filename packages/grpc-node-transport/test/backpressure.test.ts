@@ -1,0 +1,101 @@
+// Copyright (c) Mysten Labs, Inc.
+// SPDX-License-Identifier: Apache-2.0
+
+import { SuiGrpcClient } from '@mysten/sui/grpc';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
+
+import { GrpcNodeTransport } from '../src/index.js';
+import { startServer } from './server.js';
+
+const COUNT = 1000;
+const PAYLOAD = 64 * 1024;
+
+const server = await startServer();
+
+afterEach(() => server.reset());
+afterAll(() => server.stop());
+
+async function pausedRead(prefetch?: number) {
+	const transport = new GrpcNodeTransport({ baseUrl: server.baseUrl, prefetch });
+	const client = new SuiGrpcClient({ network: 'localnet', transport });
+	const method = client.ledgerService.methods.find((m) => m.name === 'ListCheckpoints')!;
+
+	try {
+		const call = transport.serverStreamingIterable(
+			method,
+			{},
+			transport.mergeOptions({
+				meta: { 'x-count': String(COUNT), 'x-payload': String(PAYLOAD) },
+			}),
+		);
+		const sequence: bigint[] = [];
+		const first = await call.responses.next();
+		sequence.push(first.value!.checkpoint!.sequenceNumber!);
+
+		// Let the server write until flow control stops it, then check that it stays stopped.
+		await sleep(250);
+		const early = server.stats.written;
+		await sleep(750);
+		const late = server.stats.written;
+
+		for await (const message of call.responses) {
+			sequence.push(message.checkpoint!.sequenceNumber!);
+		}
+		await call.status;
+
+		return { early, late, sequence };
+	} finally {
+		transport.close();
+	}
+}
+
+describe('backpressure', () => {
+	it('stops the server while the consumer pauses, then resumes in order', async () => {
+		const { early, late, sequence } = await pausedRead();
+
+		expect(late).toBe(early);
+		expect(late).toBeLessThan(64);
+		expect(sequence).toEqual(Array.from({ length: COUNT }, (_, i) => BigInt(i)));
+		expect(server.stats.completed).toBe(1);
+	});
+
+	it('bounds read-ahead further with a smaller prefetch', async () => {
+		const defaults = await pausedRead();
+		server.reset();
+		const single = await pausedRead(1);
+
+		expect(single.late).toBe(single.early);
+		expect(single.late).toBeLessThan(defaults.late);
+		expect(single.sequence).toEqual(Array.from({ length: COUNT }, (_, i) => BigInt(i)));
+	});
+
+	it('bounds read-ahead before the first pull', async () => {
+		const transport = new GrpcNodeTransport({ baseUrl: server.baseUrl, prefetch: 1 });
+		const client = new SuiGrpcClient({ network: 'localnet', transport });
+		const method = client.ledgerService.methods.find((m) => m.name === 'ListCheckpoints')!;
+
+		try {
+			const call = transport.serverStreamingIterable(
+				method,
+				{},
+				transport.mergeOptions({
+					meta: { 'x-count': String(COUNT), 'x-payload': String(PAYLOAD) },
+				}),
+			);
+			await call.headers;
+			await sleep(300);
+			const early = server.stats.written;
+			await sleep(300);
+
+			expect(server.stats.written).toBe(early);
+			expect(early).toBeLessThan(64);
+
+			let count = 0;
+			for await (const _ of call.responses) count++;
+			expect(count).toBe(COUNT);
+		} finally {
+			transport.close();
+		}
+	});
+});
