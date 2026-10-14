@@ -38,12 +38,14 @@ export const DEFAULT_MAX_RESPONSE_MESSAGE_BYTES = 64 * 1024 * 1024;
 
 /**
  * Channel options applied before `clientOptions`. Keepalive pings run only while a call is open, so
- * a long-lived subscription notices a dead connection without pinging idle channels.
+ * a long-lived subscription notices a dead connection without pinging idle channels. The 4 MiB
+ * flow-control window lets a page of history arrive without a window-update round trip.
  */
 export const DEFAULT_CLIENT_OPTIONS: Readonly<ClientOptions> = {
 	'grpc.keepalive_time_ms': 60_000,
 	'grpc.keepalive_timeout_ms': 20_000,
 	'grpc.keepalive_permit_without_calls': 0,
+	'grpc-node.flow_control_window': 4 * 1024 * 1024,
 };
 
 export interface GrpcNodeTransportOptions extends Pick<
@@ -73,7 +75,8 @@ export interface GrpcNodeTransportOptions extends Pick<
 	 * high-water mark of Node.js streams, which `@grpc/grpc-js` does not expose as an option. Another
 	 * value is set on the stream's internal state when that state has the expected shape, and is
 	 * ignored otherwise. Bytes not yet decoded are bounded separately by the HTTP/2 stream window
-	 * (`grpc-node.flow_control_window` in `clientOptions`, 64 KiB by default).
+	 * (`grpc-node.flow_control_window` in `clientOptions`, 4 MiB by default; the HTTP/2 default of
+	 * 64 KiB halves the throughput of history reads whose pages are larger than the window).
 	 */
 	prefetch?: number;
 }

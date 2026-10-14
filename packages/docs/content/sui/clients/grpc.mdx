@@ -174,7 +174,7 @@ transport's, so retries and error handling work unchanged. Compared with gRPC-we
 
 - **HTTP/2 flow control for streams.** [Ledger streams](./streaming.mdx#backpressure) read messages
   only as your loop asks for them. While the loop pauses, the transport holds at most `prefetch`
-  decoded messages (16 by default) plus the HTTP/2 stream window (64 KiB by default), and the server
+  decoded messages (16 by default) plus the HTTP/2 stream window (4 MiB by default), and the server
   waits.
 - **Cancellation the server sees.** Leaving a stream or aborting a call resets the HTTP/2 stream, so
   the node stops the work for that call.

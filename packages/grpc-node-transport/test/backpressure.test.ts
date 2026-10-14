@@ -16,8 +16,15 @@ const server = await startServer();
 afterEach(() => server.reset());
 afterAll(() => server.stop());
 
+// The messages are small, so a default-sized window would admit the whole stream.
+const WINDOW = { 'grpc-node.flow_control_window': 65_535 };
+
 async function pausedRead(prefetch?: number) {
-	const transport = new GrpcNodeTransport({ baseUrl: server.baseUrl, prefetch });
+	const transport = new GrpcNodeTransport({
+		baseUrl: server.baseUrl,
+		prefetch,
+		clientOptions: WINDOW,
+	});
 	const client = new SuiGrpcClient({ network: 'localnet', transport });
 	const method = client.ledgerService.methods.find((m) => m.name === 'ListCheckpoints')!;
 
@@ -71,7 +78,11 @@ describe('backpressure', () => {
 	});
 
 	it('bounds read-ahead before the first pull', async () => {
-		const transport = new GrpcNodeTransport({ baseUrl: server.baseUrl, prefetch: 1 });
+		const transport = new GrpcNodeTransport({
+			baseUrl: server.baseUrl,
+			prefetch: 1,
+			clientOptions: WINDOW,
+		});
 		const client = new SuiGrpcClient({ network: 'localnet', transport });
 		const method = client.ledgerService.methods.find((m) => m.name === 'ListCheckpoints')!;
 
