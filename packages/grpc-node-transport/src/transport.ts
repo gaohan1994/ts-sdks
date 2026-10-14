@@ -147,6 +147,9 @@ function callOptions(options: RpcOptions): CallOptions {
 // <limit>` for a compressed message (`build/src/compression-filter.js`).
 const RECEIVE_LIMIT =
 	/^Received message (?:larger than max \(|that decompresses to a size larger than \d)/;
+// grpc-js reports a reset or closed connection as INTERNAL with one of these messages.
+const CONNECTION_LOST =
+	/RST_STREAM|GOAWAY|without gRPC status|Session closed|socket hang up|ECONNRESET/;
 
 function reasonMessage(reason: unknown): string {
 	if (typeof reason === 'string') return reason;
@@ -189,9 +192,13 @@ function toRpcError(error: unknown, method: MethodInfo, signal: AbortSignal | un
 		// `@grpc/grpc-js` has percent-decoded `details` with `decodeURI`. gRPC servers escape only `%`
 		// and bytes outside printable ASCII, which `decodeURI` decodes as `decodeURIComponent` does.
 		const { code, details, metadata } = error as ServiceError;
+		// A reset or closed connection arrives as INTERNAL; the gRPC-web transport reports it as
+		// UNAVAILABLE so streams reconnect, and the same applies here.
+		const lost =
+			code === (GrpcStatusCode.INTERNAL as number) && CONNECTION_LOST.test(details ?? '');
 		rpcError = new RpcError(
 			details || statusName(code),
-			statusName(code),
+			statusName(lost ? GrpcStatusCode.UNAVAILABLE : code),
 			fromGrpcMetadata(metadata),
 		);
 		markGrpcStatusMessageDecoded(rpcError);

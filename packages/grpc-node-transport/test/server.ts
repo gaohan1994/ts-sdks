@@ -21,7 +21,7 @@ import type {
 	ServiceDefinition,
 } from '@grpc/grpc-js';
 import { GrpcTypes } from '@mysten/sui/grpc';
-import { createServer } from 'node:http2';
+import { constants, createServer } from 'node:http2';
 import type { ServerHttp2Stream } from 'node:http2';
 import type { AddressInfo } from 'node:net';
 import { gzipSync } from 'node:zlib';
@@ -226,6 +226,35 @@ export async function startCompressedServer(bytes: number) {
 	return {
 		baseUrl: `http://127.0.0.1:${port}`,
 		stats,
+		stop: () => new Promise<void>((resolve) => server.close(() => resolve())),
+	};
+}
+
+// `startResettingServer` answers each call with one message, then resets the HTTP/2 stream with
+// INTERNAL_ERROR before any gRPC status, like a front end ending a long-lived stream.
+export async function startResettingServer() {
+	const message = ListCheckpointsResponse.toBinary(
+		ListCheckpointsResponse.create({ checkpoint: { sequenceNumber: 1n } }),
+	);
+	const frame = Buffer.alloc(5 + message.length);
+	frame.writeUInt8(0, 0);
+	frame.writeUInt32BE(message.length, 1);
+	Buffer.from(message).copy(frame, 5);
+
+	const server = createServer();
+	server.on('stream', (stream: ServerHttp2Stream) => {
+		stream.resume();
+		stream.on('error', () => {});
+		stream.on('end', () => {
+			stream.respond({ ':status': 200, 'content-type': 'application/grpc' });
+			stream.write(frame, () => stream.close(constants.NGHTTP2_INTERNAL_ERROR));
+		});
+	});
+	await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+	const { port } = server.address() as AddressInfo;
+
+	return {
+		baseUrl: `http://127.0.0.1:${port}`,
 		stop: () => new Promise<void>((resolve) => server.close(() => resolve())),
 	};
 }

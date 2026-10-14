@@ -7,7 +7,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { GrpcNodeTransport } from '../src/index.js';
-import { startCompressedServer, startServer } from './server.js';
+import { startCompressedServer, startResettingServer, startServer } from './server.js';
 
 const server = await startServer();
 
@@ -173,6 +173,28 @@ describe('GrpcNodeTransport', () => {
 			const error = await call.responses.next().catch((reason: unknown) => reason);
 			expect(error).toMatchObject({ code: 'UNAVAILABLE' });
 			expect(isNonRetryable(error)).toBe(true);
+		});
+
+		it('reports a stream reset before its status as UNAVAILABLE', async () => {
+			const resetting = await startResettingServer();
+			const lossy = new GrpcNodeTransport({ baseUrl: resetting.baseUrl });
+			const client = new SuiGrpcClient({ network: 'localnet', transport: lossy });
+			try {
+				const call = lossy.serverStreamingIterable(
+					listCheckpoints(client),
+					{},
+					lossy.mergeOptions(),
+				);
+				const first = await call.responses.next();
+				expect(first.value).toMatchObject({ checkpoint: { sequenceNumber: 1n } });
+				await expect(call.responses.next()).rejects.toMatchObject({
+					code: 'UNAVAILABLE',
+					message: expect.stringContaining('RST_STREAM'),
+				});
+			} finally {
+				lossy.close();
+				await resetting.stop();
+			}
 		});
 
 		it('reports an unreachable node as UNAVAILABLE', async () => {
