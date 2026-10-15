@@ -16,8 +16,8 @@ export async function resolveNameServiceName(client: DAppKitCompatibleClient, ad
 			address,
 		});
 
-		const name = result?.data.name;
-		cache.set(address, name ? normalizeSuiNSName(name, 'at') : null);
+		const name = result?.data.name ? normalizeSuiNSName(result.data.name, 'at') : null;
+		cache.set(address, name);
 		return name;
 	} catch {
 		cache.set(address, null);
